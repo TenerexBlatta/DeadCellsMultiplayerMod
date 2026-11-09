@@ -99,6 +99,21 @@ public sealed partial class NetNode
             : EP2PSend.k_EP2PSendReliable;
     }
 
+    /// <summary>Steam rejects k_EP2PSendUnreliable packets larger than this (one MTU).</summary>
+    private const int SteamUnreliableMaxBytes = 1200;
+
+    /// <summary>
+    /// Size-aware send type: an unreliable packet over Steam's 1200-byte limit is rejected by
+    /// SendP2PPacket and silently lost, so it goes out reliable instead.
+    /// </summary>
+    private static EP2PSend ResolveSteamSendType(string line, int encodedBytes)
+    {
+        var sendType = ResolveSteamSendType(line);
+        if (sendType == EP2PSend.k_EP2PSendUnreliable && encodedBytes > SteamUnreliableMaxBytes)
+            return EP2PSend.k_EP2PSendReliable;
+        return sendType;
+    }
+
     private int GetSteamOutgoingChannel()
     {
         return _role == NetRole.Host
@@ -159,7 +174,7 @@ public sealed partial class NetNode
             return BroadcastLineSafe(line);
 
         if (transport.Kind == DeadCellsMultiplayerMod.Network.NetTransportKind.Steam && _steamBridge != null)
-            return SendLineToSteamBridgeSafe(_steamHostId.m_SteamID, line, ResolveSteamSendType(line), GetSteamOutgoingChannel());
+            return SendLineToSteamBridgeSafe(_steamHostId.m_SteamID, line, sendType: null, GetSteamOutgoingChannel());
 
         return SendLineToStreamSafe(_stream, _sendLock, line);
     }
@@ -176,7 +191,6 @@ public sealed partial class NetNode
                     steamSnapshot.Add(c);
             }
             if (steamSnapshot.Count == 0) return;
-            var sendType = ResolveSteamSendType(line);
             var channel = SteamP2PChannelHostToClient;
             var encoded = ProtocolWire.Encode(line, MaxProtocolLineChars);
             if (!encoded.Success)
@@ -185,10 +199,13 @@ public sealed partial class NetNode
                 return;
             }
             var bytes = encoded.Bytes;
+            var sendType = ResolveSteamSendType(line, bytes.Length);
             NetTrafficDiagnostics.RecordSent(bytes.Length);
             foreach (var client in steamSnapshot)
             {
-                _steamBridge.TrySend(client.SteamId.m_SteamID, sendType, channel, bytes, out _);
+                // Previously ignored: a rejected host packet vanished without any trace.
+                if (!_steamBridge.TrySend(client.SteamId.m_SteamID, sendType, channel, bytes, out _))
+                    NetTrafficDiagnostics.RecordSendError();
             }
             return;
         }
@@ -307,13 +324,13 @@ public sealed partial class NetNode
         }
         var bytes = encoded.Bytes;
         NetTrafficDiagnostics.RecordSent(bytes.Length);
-        var st = sendType ?? ResolveSteamSendType(line);
+        var st = sendType ?? ResolveSteamSendType(line, bytes.Length);
         if (!_steamBridge.TrySend(client.SteamId.m_SteamID, st, SteamP2PChannelHostToClient, bytes, out var err))
             _log.Warning("[NetNode] Steam send failed to {SteamId}: {Error}", client.SteamId.m_SteamID, err);
         return Task.CompletedTask;
     }
 
-    private Task SendLineToSteamBridgeSafe(ulong steamId, string line, EP2PSend sendType, int channel)
+    private Task SendLineToSteamBridgeSafe(ulong steamId, string line, EP2PSend? sendType, int channel)
     {
         if (_steamBridge == null || steamId == 0UL)
             return Task.CompletedTask;
@@ -328,8 +345,10 @@ public sealed partial class NetNode
         }
         NetTrafficDiagnostics.RecordSent(bytes.Length);
 
-        if (!_steamBridge.TrySend(steamId, sendType, channel, bytes, out var err))
+        var resolvedSendType = sendType ?? ResolveSteamSendType(line, bytes.Length);
+        if (!_steamBridge.TrySend(steamId, resolvedSendType, channel, bytes, out var err))
         {
+            NetTrafficDiagnostics.RecordSendError();
             var ctx = line.StartsWith("HELLO", StringComparison.Ordinal) ? " HELLO" : string.Empty;
             _log.Warning("[NetNode] Steam send failed to {SteamId}: {Error}{Context}", steamId, err, ctx);
         }

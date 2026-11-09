@@ -535,9 +535,20 @@ public sealed partial class NetNode
             }
 
             if (!hasPacket)
-                await Task.Delay(8, ct).ConfigureAwait(false);
+            {
+                // Adaptive poll: a fixed 8 ms idle wait added up to one full wait (more at coarse
+                // timer resolution) of latency to every packet during play. While traffic is
+                // flowing, poll every ~1 ms; fall back to 8 ms once the link has been quiet.
+                var quietSeconds = (double)(Stopwatch.GetTimestamp() - Interlocked.Read(ref _lastSteamPacketReceivedTicks)) / Stopwatch.Frequency;
+                var delayMs = quietSeconds < SteamActivePollWindowSeconds ? SteamActivePollDelayMs : SteamIdlePollDelayMs;
+                await Task.Delay(delayMs, ct).ConfigureAwait(false);
+            }
         }
     }
+
+    private const double SteamActivePollWindowSeconds = 0.25;
+    private const int SteamActivePollDelayMs = 1;
+    private const int SteamIdlePollDelayMs = 8;
 
     private void TrySendSteamKeepAlive()
     {

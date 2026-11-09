@@ -128,6 +128,13 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
         private const string NewSkillExecutePacketPrefix = "@newexec:";
         private const int MobWirePacketByteBudget = 4096;
         /// <summary>
+        /// Byte budget for MOBMOVE/MOBDRAW batches. Those are sent with k_EP2PSendUnreliable,
+        /// which Steam caps at 1200 bytes per packet; a 4 KB batch was rejected by SendP2PPacket
+        /// and silently lost, freezing every mob in it on the client. Kept below 1200 with margin
+        /// for the UTF-8 size estimate. Reliable MOBSTATE batches keep the larger budget.
+        /// </summary>
+        private const int MobRealtimeWirePacketByteBudget = 1100;
+        /// <summary>
         /// MOBDRAW is sent unreliably; a lost interest-granting draw used to strand the host
         /// relevance gate forever. Re-assert interest this often (~2s at 30fps) while visible.
         /// </summary>

@@ -512,7 +512,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 }
 
                 var moveEntryBytes = EstimateMobMoveWireBytes(moveSnapshot, s_moveSnapshotsScratch.Count);
-                if (s_moveSnapshotsScratch.Count > 0 && moveBytes + moveEntryBytes > MobWirePacketByteBudget)
+                if (s_moveSnapshotsScratch.Count > 0 && moveBytes + moveEntryBytes > MobRealtimeWirePacketByteBudget)
                 {
                     TrySendHostMovesBatchAsync(net, s_moveSnapshotsScratch);
                     s_moveSnapshotsScratch.Clear();
@@ -838,7 +838,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                     TryBuildClientDrawUpdate(net, mob, syncId, flags, out var draw))
                 {
                     var drawEntryBytes = EstimateMobDrawWireBytes(draw, s_drawsScratch.Count);
-                    if (s_drawsScratch.Count > 0 && drawBytes + drawEntryBytes > MobWirePacketByteBudget)
+                    if (s_drawsScratch.Count > 0 && drawBytes + drawEntryBytes > MobRealtimeWirePacketByteBudget)
                     {
                         MobSyncTrace.LogSendDrawBatch("client", s_drawsScratch);
                         net.SendMobDrawBatch(s_drawsScratch);
